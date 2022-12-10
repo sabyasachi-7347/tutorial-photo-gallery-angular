@@ -4,36 +4,42 @@ import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 import { Platform } from '@ionic/angular';
-
+import { Geolocation } from '@capacitor/geolocation';
+import { NativeGeocoder, NativeGeocoderResult, NativeGeocoderOptions } from '@awesome-cordova-plugins/native-geocoder/ngx';
 
 
 @Injectable({
   providedIn: 'root',
 })
 export class PhotoService {
-  public photos: UserPhoto[] = [];
+  public photos: any = '';
   private PHOTO_STORAGE: string = 'photos';
+  lat: any = "";
+  long: any = "";
+  add: any = "";
+  allTrucks: any = [];
 
-  constructor(private platform: Platform) {}
+  constructor(private platform: Platform,public geoCode:NativeGeocoder) {}
 
   public async loadSaved() {
     // Retrieve cached photo array data
     const photoList = await Preferences.get({ key: this.PHOTO_STORAGE });
-    this.photos = JSON.parse(photoList.value) || [];
-
+    this.photos = JSON.parse(photoList.value);
+    const truckdata = await Preferences.get({ key: 'trucks' });
+    this.allTrucks = JSON.parse(truckdata.value)?JSON.parse(truckdata.value):[];
     // If running on the web...
     if (!this.platform.is('hybrid')) {
       // Display the photo by reading into base64 format
-      for (let photo of this.photos) {
+      // for (let photo of this.photos) {
         // Read each saved photo's data from the Filesystem
         const readFile = await Filesystem.readFile({
-          path: photo.filepath,
+          path: this.photos.filepath,
           directory: Directory.Data,
         });
 
         // Web platform only: Load the photo as base64 data
-        photo.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
-      }
+        this.photos.webviewPath = `data:image/jpeg;base64,${readFile.data}`;
+      // }
     }
   }
 
@@ -57,13 +63,15 @@ export class PhotoService {
     const savedImageFile = await this.savePicture(capturedPhoto);
 
     // Add new photo to Photos array
-    this.photos.unshift(savedImageFile);
+    this.photos=savedImageFile;
 
     // Cache all photo data for future retrieval
     Preferences.set({
       key: this.PHOTO_STORAGE,
       value: JSON.stringify(this.photos),
     });
+
+    this.getCurrentPosition();
   }
 
   // Save picture to file on device
@@ -118,16 +126,17 @@ export class PhotoService {
   // Delete picture by removing it from reference data and the filesystem
   public async deletePicture(photo: UserPhoto, position: number) {
     // Remove this photo from the Photos reference data array
-    this.photos.splice(position, 1);
+    this.photos = "";
 
     // Update photos array cache by overwriting the existing photo array
-    Preferences.set({
-      key: this.PHOTO_STORAGE,
-      value: JSON.stringify(this.photos),
-    });
+    Preferences.remove({key:this.PHOTO_STORAGE}).then(result =>{
+      console.log(result);
+      
+    })
+console.log(photo);
 
     // delete photo file from filesystem
-    const filename = photo.filepath.substr(photo.filepath.lastIndexOf('/') + 1);
+    const filename = photo.filepath;
     await Filesystem.deleteFile({
       path: filename,
       directory: Directory.Data,
@@ -143,8 +152,43 @@ export class PhotoService {
       };
       reader.readAsDataURL(blob);
     });
-}
 
+   async getCurrentPosition(){
+await Geolocation.getCurrentPosition().then(async(cords)=>{
+console.log(cords);
+// alert(cords.coords.latitude)
+// alert(cords.coords.longitude)
+this.lat = cords.coords.latitude;
+this.long = cords.coords.longitude;
+
+let options: NativeGeocoderOptions = {
+  useLocale: true,
+  maxResults: 5
+};
+
+await this.geoCode.reverseGeocode(this.lat,this.long,options).then((result: NativeGeocoderResult[]) =>{
+  console.log(JSON.stringify(result[0]))
+  // alert(JSON.stringify(result[0]))
+  this.add = result[0].subLocality+', '+result[0].locality+', '+result[0].subAdministrativeArea+', '+result[0].administrativeArea+', '+result[0].countryName+', '+result[0].postalCode;
+} )
+
+})
+    }
+saveData(){
+  this.allTrucks.push({lat:this.lat,long:this.long,add:this.add,image:this.photos.webviewPath})
+  Preferences.set({
+    key: 'trucks',
+    value: JSON.stringify(this.allTrucks),
+  });
+
+  this.deletePicture(this.photos,0);
+  this.lat="";
+  this.long = ""
+  this.add = "";
+  this.photos = "";
+
+}
+  }
 export interface UserPhoto {
   filepath: string;
   webviewPath: string;
